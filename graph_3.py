@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-# transaction_graph_fixed3.py
-import json, random
+# transaction_graph_fixed4.py
+import json
+import random
+import datetime
 from pathlib import Path
 
 def generate_transaction_data_realistic(n_accounts=40, n_transactions=600):
@@ -9,46 +11,62 @@ def generate_transaction_data_realistic(n_accounts=40, n_transactions=600):
     n_hubs = max(2, n_accounts // 6)
     hubs = random.sample(accounts, n_hubs)
     
+    # Definiujemy zakres dat (np. ostatnie 90 dni)
+    end_date = datetime.date.today()
+    start_date = end_date - datetime.timedelta(days=90)
+    date_range_days = (end_date - start_date).days
+    
+    all_dates = []
+
     for _ in range(n_transactions):
         if random.random() < 0.4:
             src = random.choice(hubs)
         else:
             src = random.choice(accounts)
+        
         possible_targets = [a for a in accounts if a != src]
         if src in hubs:
             tgt = random.choice(possible_targets)
         else:
             tgt = random.choice(hubs + random.sample(possible_targets, k=2))
+        
         amount = round(random.paretovariate(1.5) * 200, 2)
-        txs.append({"source": src, "target": tgt, "amount": amount})
+        
+        # Generuj losową datę transakcji
+        rand_days = random.randint(0, date_range_days)
+        tx_date = (start_date + datetime.timedelta(days=rand_days)).isoformat()
+        txs.append({"source": src, "target": tgt, "amount": amount, "date": tx_date})
+        all_dates.append(tx_date)
         
         # 🔁 25% szansy na transakcję w drugą stronę
         if random.random() < 0.25:
             back_amount = round(random.paretovariate(1.5) * 150, 2)
-            txs.append({"source": tgt, "target": src, "amount": back_amount})
+            # Data transakcji zwrotnej (taka sama lub dzień później)
+            back_date = (datetime.date.fromisoformat(tx_date) + datetime.timedelta(days=random.randint(0, 1))).isoformat()
+            txs.append({"source": tgt, "target": src, "amount": back_amount, "date": back_date})
+            all_dates.append(back_date)
     
-    agg = {}
-    for t in txs:
-        key = (t["source"], t["target"])
-        if key not in agg:
-            agg[key] = {"count": 0, "sum": 0.0}
-        agg[key]["count"] += 1
-        agg[key]["sum"] += t["amount"]
-    
+    # Nie agregujemy już w Pythonie! Wysyłamy surowe transakcje.
     nodes = [{"id": a, "is_hub": a in hubs} for a in accounts]
-    links = [{"source": s, "target": t, "count": v["count"], "sum": v["sum"]} 
-             for (s, t), v in agg.items()]
     
-    return {"nodes": nodes, "links": links}
+    # Znajdź min i max datę do ustawienia filtrów
+    min_date = min(all_dates)
+    max_date = max(all_dates)
+    
+    return {
+        "nodes": nodes, 
+        "transactions": txs,
+        "minDate": min_date,
+        "maxDate": max_date
+    }
 
-def build_html(data, output_path="transaction_graph_fixed3.html"):
+def build_html(data, output_path="transaction_graph_fixed4.html"):
     data_json = json.dumps(data)
-    # Zmieniono nazwę pliku wyjściowego na fixed3
     html = """<!doctype html>
 <html lang="pl">
 <head>
 <meta charset="utf-8"/>
-<title>Graf transakcji — Poprawione krawędzie</title>
+<title>Graf transakcji z filtrowaniem dat</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
 html,body{height:100%;margin:0;background:#0c1428;color:#e6eef8;font-family:Inter,Segoe UI,Arial}
@@ -60,20 +78,27 @@ text.label{font-size:11px;pointer-events:none;fill:#cfe8ff}
 #tooltip{position:absolute;pointer-events:none;padding:8px;border-radius:6px;background:rgba(2,6,23,0.88);color:#dbeefe;font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,0.6)}
 header.ui{position:absolute;left:12px;top:12px;z-index:10;background:rgba(255,255,255,0.02);padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
 input,button{padding:4px 8px;border-radius:4px;border:none;font-size:13px}
+input[type=date]{background:#0c1428;color:#e6eef8;border:1px solid #2563eb;padding:3px 6px;}
 button{background:#2563eb;color:white;cursor:pointer;margin-left:4px}
 button:hover{background:#1e40af}
 table{margin-top:10px;border-collapse:collapse;width:100%;font-size:13px;color:#d8e0f0}
 th,td{border-bottom:1px solid rgba(255,255,255,0.1);padding:4px 8px;text-align:left}
-#tableContainer{position:absolute;right:12px;top:12px;z-index:10;width:340px;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;overflow:auto;max-height:90%}
+#tableContainer{position:absolute;right:12px;top:12px;z-index:10;width:380px;background:rgba(255,255,255,0.04);border-radius:8px;padding:10px;overflow:auto;max-height:90%}
 </style>
 </head>
 <body>
 <header class="ui">
   <strong>Graf transakcji</strong><br>
-  <small>Kliknij konto, aby zobaczyć jego transakcje. Wpisz numer, aby przefiltrować graf.</small><br>
-  <input id="accountInput" placeholder="np. KONTO_005"/>
+  <small>Kliknij konto, aby zobaczyć transakcje. Filtruj wg daty lub konta.</small><br>
+  <label for="dateStart">Od:</label>
+  <input type="date" id="dateStart" style="vertical-align: middle;">
+  <label for="dateEnd" style="margin-left: 5px;">Do:</label>
+  <input type="date" id="dateEnd" style="vertical-align: middle;">
+  <br style="margin-top: 6px;">
+  <input id="accountInput" placeholder="np. KONTO_005" style="margin-top: 4px;"/>
   <button id="filterBtn">Pokaż graf i transakcje</button>
   <button id="resetBtn">Resetuj graf</button>
+  <br>
   <label><input type="checkbox" id="showEdgeLabels" checked> Pokaż etykiety</label>
 </header>
 <div id="tableContainer"></div>
@@ -81,9 +106,11 @@ th,td{border-bottom:1px solid rgba(255,255,255,0.1);padding:4px 8px;text-align:l
 <svg></svg>
 
 <script>
-// surowe (niemutowane) dane — zawsze na nich operujemy przy filtrowaniu
+// surowe (niemutowane) dane — teraz zawierają `transactions` zamiast `links`
 const rawGraph = JSON.parse(JSON.stringify(__DATA__));
-let graph = JSON.parse(JSON.stringify(rawGraph));
+// `graph` będzie dynamicznie generowany (filtrowany i agregowany)
+let graph = { nodes: [], links: [] }; 
+let currentAccountFilter = null; // Przechowuje stan filtra konta
 
 const svg = d3.select("svg");
 const width = window.innerWidth, height = window.innerHeight;
@@ -100,6 +127,12 @@ defs.append("marker")
 
 const tooltip = d3.select("#tooltip");
 const tableContainer = d3.select("#tableContainer");
+const dateStartInput = document.getElementById("dateStart");
+const dateEndInput = document.getElementById("dateEnd");
+
+// Ustaw domyślne wartości filtrów dat na min/max z danych
+dateStartInput.value = rawGraph.minDate;
+dateEndInput.value = rawGraph.maxDate;
 
 let link, node, edgeLabel;
 
@@ -122,14 +155,18 @@ function quadraticBezierPoint(p0, p1, p2, t) {
   return {x, y};
 }
 
-function updateGraph(){
+/**
+ * Główna funkcja do rysowania D3.
+ * Czyta dane z globalnej zmiennej `graph`.
+ */
+function drawD3Graph(){
   g.selectAll("*").remove();
 
   // mapa WSZYSTKICH połączeń (source->target)
   const allLinks = new Map();
   graph.links.forEach(l => {
-    const s = (typeof l.source === "string") ? l.source : (l.source.id || l.source);
-    const t = (typeof l.target === "string") ? l.target : (l.target.id || l.target);
+    const s = idOf(l.source);
+    const t = idOf(l.target);
     const key = `${s}->${t}`;
     allLinks.set(key, true);
   });
@@ -176,41 +213,30 @@ function updateGraph(){
   simulation.alpha(1).restart();
 }
 
-// =================================================================
-// FUNKCJA TICKED Z POPRAWKĄ
-// =================================================================
 function ticked(allLinks){
   link.attr("d", d => {
     const sObj = (typeof d.source === "object") ? d.source : graph.nodes.find(n => n.id === d.source);
     const tObj = (typeof d.target === "object") ? d.target : graph.nodes.find(n => n.id === d.target);
     
-    // Pozycje source i target dla *aktualnie rysowanej* krawędzi
     const sx = sObj ? sObj.x : 0;
     const sy = sObj ? sObj.y : 0;
     const tx = tObj ? tObj.x : 0;
     const ty = tObj ? tObj.y : 0;
 
-    const sId = (typeof d.source === "string") ? d.source : (d.source.id || d.source);
-    const tId = (typeof d.target === "string") ? d.target : (d.target.id || d.target);
+    const sId = idOf(d.source);
+    const tId = idOf(d.target);
     
     const reverseKey = `${tId}->${sId}`;
     const hasReverse = allLinks.has(reverseKey);
     
     let curveOffset = 0;
     if (hasReverse) {
-      // Logika przesunięcia jest poprawna: A->B dostaje +60, B->A dostaje -60
       curveOffset = (sId < tId) ? 60 : -60;
     }
     
-    // --- POCZĄTEK POPRAWKI ---
-    // Problem: wektor prostopadły (perpX, perpY) musi być *taki sam* dla pary (A, B)
-    // niezależnie od tego, czy rysujemy A->B czy B->A.
-    
-    // 1. Ustal, który węzeł jest "kanonicznie" pierwszy (np. alfabetycznie)
     const nodeA = (sId < tId) ? sObj : tObj;
     const nodeB = (sId < tId) ? tObj : sObj;
     
-    // 2. Oblicz wektor (dx, dy) ZAWSZE od węzła A do B
     const nAx = nodeA ? nodeA.x : 0;
     const nAy = nodeA ? nodeA.y : 0;
     const nBx = nodeB ? nodeB.x : 0;
@@ -220,19 +246,11 @@ function ticked(allLinks){
     const dy_canonical = nBy - nAy;
     const dist_canonical = Math.sqrt(dx_canonical*dx_canonical + dy_canonical*dy_canonical) || 1;
 
-    // 3. Oblicz wektor prostopadły na podstawie *kanonicznego* wektora (A->B)
     const perpX = -dy_canonical / dist_canonical;
     const perpY = dx_canonical / dist_canonical;
     
-    // 4. Punkt kontrolny: środek linii + przesunięcie (curveOffset)
-    //    wzdłuż wektora prostopadłego.
-    //    Środek (sx+tx)/2 jest taki sam dla A->B i B->A.
-    //    perpX/perpY są teraz takie same dla obu.
-    //    curveOffset jest inny (+60 vs -60).
-    //    To poprawnie rozdziela krawędzie.
     const cx = (sx + tx) / 2 + perpX * curveOffset;
     const cy = (sy + ty) / 2 + perpY * curveOffset;
-    // --- KONIEC POPRAWKI ---
     
     return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
   });
@@ -241,7 +259,6 @@ function ticked(allLinks){
 
   if (edgeLabel) {
     edgeLabel.each(function(d) {
-      // Tę samą logikę trzeba zastosować do pozycjonowania etykiet
       const sObj = (typeof d.source === "object") ? d.source : graph.nodes.find(n => n.id === d.source);
       const tObj = (typeof d.target === "object") ? d.target : graph.nodes.find(n => n.id === d.target);
       
@@ -250,8 +267,8 @@ function ticked(allLinks){
       const tx = tObj ? tObj.x : 0;
       const ty = tObj ? tObj.y : 0;
 
-      const sId = (typeof d.source === "string") ? d.source : (d.source.id || d.source);
-      const tId = (typeof d.target === "string") ? d.target : (d.target.id || d.target);
+      const sId = idOf(d.source);
+      const tId = idOf(d.target);
       
       const reverseKey = `${tId}->${sId}`;
       const hasReverse = allLinks.has(reverseKey);
@@ -260,7 +277,6 @@ function ticked(allLinks){
         curveOffset = (sId < tId) ? 60 : -60;
       }
       
-      // --- POCZĄTEK POPRAWKI (ETYKIETY) ---
       const nodeA = (sId < tId) ? sObj : tObj;
       const nodeB = (sId < tId) ? tObj : sObj;
       
@@ -273,16 +289,12 @@ function ticked(allLinks){
       const dy_canonical = nBy - nAy;
       const dist_canonical = Math.sqrt(dx_canonical*dx_canonical + dy_canonical*dy_canonical) || 1;
 
-      // Ten sam kanoniczny wektor prostopadły
       const perpX = -dy_canonical / dist_canonical;
       const perpY = dx_canonical / dist_canonical;
 
-      // Punkt kontrolny
       const cx = (sx + tx) / 2 + perpX * curveOffset;
       const cy = (sy + ty) / 2 + perpY * curveOffset;
-      // --- KONIEC POPRAWKI (ETYKIETY) ---
       
-      // punkt na krzywej Beziera dla t=0.5 (środek krzywej)
       const p = quadraticBezierPoint(
         {x: sx, y: sy},
         {x: cx, y: cy},
@@ -290,10 +302,7 @@ function ticked(allLinks){
         0.5
       );
       
-      // dodatkowe przesunięcie etykiety w kierunku prostopadłym do krzywej
       const labelOffset = hasReverse ? 12 : 8;
-      
-      // Używamy tego samego kanonicznego wektora prostopadłego
       const labelX = p.x + perpX * labelOffset;
       const labelY = p.y + perpY * labelOffset;
       
@@ -303,9 +312,6 @@ function ticked(allLinks){
     });
   }
 }
-// =================================================================
-// KONIEC FUNKCJI TICKED
-// =================================================================
 
 // drag: TRWAŁE pozycje (nie resetujemy fx/fy)
 function drag(sim){
@@ -322,60 +328,157 @@ function drag(sim){
   return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
 }
 
-// pokaż tabelę transakcji (używa rawGraph, bo tam są stringi)
-function showTable(accountId){
-  const relevant = rawGraph.links.filter(l => l.source === accountId || l.target === accountId);
-  if (relevant.length === 0) {
-    tableContainer.html("<h3>"+accountId+"</h3><p>Brak transakcji.</p>");
-    return;
-  }
-  let html = "<h3>"+accountId+"</h3><table><thead><tr><th>Nadawca</th><th>Odbiorca</th><th>Liczba</th><th>Suma</th></tr></thead><tbody>";
-  relevant.forEach(r => {
-    html += "<tr><td>"+r.source+"</td><td>"+r.target+"</td><td>"+r.count+"</td><td>"+r.sum.toFixed(2)+" zł</td></tr>";
-  });
-  html += "</tbody></table>";
-  tableContainer.html(html);
+/**
+ * NOWA FUNKCJA
+ * Filtruje surowe dane i agreguje je, aby przygotować dane dla D3.
+ * Ustawia globalną zmienną `graph` i odpala rysowanie.
+ */
+function updateVisualization() {
+    const startDate = dateStartInput.value;
+    const endDate = dateEndInput.value;
+    
+    // 1. Filtruj transakcje po dacie
+    let filteredTransactions = rawGraph.transactions.filter(t => {
+        return t.date >= startDate && t.date <= endDate;
+    });
+    
+    let nodesToDisplay;
+    
+    // 2. (Jeśli aktywny) Filtruj transakcje po koncie
+    if (currentAccountFilter) {
+        filteredTransactions = filteredTransactions.filter(t => 
+            t.source === currentAccountFilter || t.target === currentAccountFilter
+        );
+        
+        // Znajdź powiązane węzły
+        const relatedNodes = new Set([currentAccountFilter]);
+        filteredTransactions.forEach(t => {
+            relatedNodes.add(t.source);
+            relatedNodes.add(t.target);
+        });
+        nodesToDisplay = rawGraph.nodes.filter(n => relatedNodes.has(n.id));
+    }
+    
+    // 3. Agreguj przefiltrowane transakcje w linki
+    const agg = {};
+    for (const t of filteredTransactions) {
+        const key = `${t.source}->${t.target}`; // Klucz agregacji
+        if (!agg[key]) {
+            agg[key] = { source: t.source, target: t.target, count: 0, sum: 0.0 };
+        }
+        agg[key].count += 1;
+        agg[key].sum += t.amount;
+    }
+    // Konwertuj mapę agregacji na listę linków
+    const aggregatedLinks = Object.values(agg).map(l => ({
+        source: l.source,
+        target: l.target,
+        count: l.count,
+        sum: l.sum
+    }));
+
+    // 4. (Jeśli brak filtra konta) Filtruj węzły, aby pokazać tylko te z linkami
+    if (!currentAccountFilter) {
+        const nodesInLinks = new Set();
+        aggregatedLinks.forEach(l => {
+            nodesInLinks.add(idOf(l.source));
+            nodesInLinks.add(idOf(l.target));
+        });
+        // Pokaż też węzły bez linków, jeśli chcesz
+        // nodesToDisplay = rawGraph.nodes;
+        // Albo tylko te aktywne:
+        nodesToDisplay = rawGraph.nodes.filter(n => nodesInLinks.has(n.id));
+    }
+    
+    // 5. Ustaw globalny obiekt `graph`
+    graph = { nodes: nodesToDisplay, links: aggregatedLinks };
+    
+    // 6. Narysuj graf D3
+    drawD3Graph();
 }
 
-// filter: opieramy się NA ZAWSZE NA rawGraph (niemutowanym)
+
+/**
+ * ZMODYFIKOWANA FUNKCJA
+ * Pokazuje teraz indywidualne transakcje, respektując filtr daty.
+ */
+function showTable(accountId){
+    const startDate = dateStartInput.value;
+    const endDate = dateEndInput.value;
+
+    // Filtruj surowe transakcje po koncie ORAZ dacie
+    const relevant = rawGraph.transactions.filter(t => 
+        (t.source === accountId || t.target === accountId) &&
+        t.date >= startDate && t.date <= endDate
+    );
+    
+    // Sortuj (np. od najnowszych)
+    relevant.sort((a, b) => b.date.localeCompare(a.date));
+
+    if (relevant.length === 0) {
+        tableContainer.html(`<h3>${accountId}</h3><p>Brak transakcji w wybranym okresie.</p>`);
+        return;
+    }
+    
+    let html = `<h3>${accountId} (Pojedyncze transakcje)</h3>
+        <table><thead>
+        <tr><th>Data</th><th>Nadawca</th><th>Odbiorca</th><th>Kwota</th></tr>
+        </thead><tbody>`;
+        
+    relevant.forEach(r => {
+        html += `<tr>
+            <td>${r.date}</td>
+            <td>${r.source}</td>
+            <td>${r.target}</td>
+            <td>${r.amount.toFixed(2)} zł</td>
+        </tr>`;
+    });
+    html += "</tbody></table>";
+    tableContainer.html(html);
+}
+
+// ZMODYFIKOWANE HANDLERY
 document.getElementById("filterBtn").onclick = () => {
-  const input = document.getElementById("accountInput").value.trim();
-  if (!input) return;
-  
-  const accountExists = rawGraph.nodes.some(n => n.id === input);
-  if (!accountExists) {
-    alert("Nie znaleziono rachunku: " + input);
-    return;
-  }
-  
-  const relatedLinks = rawGraph.links.filter(l => l.source === input || l.target === input);
-  const relatedNodes = new Set([input]);
-  relatedLinks.forEach(l => {
-    relatedNodes.add(l.source);
-    relatedNodes.add(l.target);
-  });
-  
-  graph = {
-    nodes: rawGraph.nodes.filter(n => relatedNodes.has(n.id)),
-    links: relatedLinks.map(l => ({ source: l.source, target: l.target, count: l.count, sum: l.sum }))
-  };
-  
-  showTable(input);
-  updateGraph();
+    const input = document.getElementById("accountInput").value.trim();
+    if (!input) return;
+    
+    const accountExists = rawGraph.nodes.some(n => n.id === input);
+    if (!accountExists) {
+        alert("Nie znaleziono rachunku: " + input);
+        return;
+    }
+    
+    currentAccountFilter = input; // Ustaw filtr konta
+    updateVisualization(); // Przebuduj graf
+    showTable(currentAccountFilter); // Pokaż tabelę dla tego konta
 };
 
-// reset przywraca pełny widok (kopię rawGraph)
 document.getElementById("resetBtn").onclick = () => {
-  graph = JSON.parse(JSON.stringify(rawGraph));
-  tableContainer.html("");
-  updateGraph();
+    currentAccountFilter = null; // Wyczyść filtr konta
+    document.getElementById("accountInput").value = "";
+    tableContainer.html("");
+    updateVisualization(); // Przebuduj graf (pokaż wszystko)
 };
 
-// checkbox etykiet
-document.getElementById("showEdgeLabels").onchange = updateGraph;
+// NOWE HANDLERY DLA DAT
+dateStartInput.onchange = () => {
+    updateVisualization(); // Przebuduj graf
+    if (currentAccountFilter) {
+        showTable(currentAccountFilter); // Odśwież tabelę, jeśli jest aktywna
+    }
+};
+dateEndInput.onchange = () => {
+    updateVisualization();
+    if (currentAccountFilter) {
+        showTable(currentAccountFilter);
+    }
+};
 
-// initial
-updateGraph();
+// Checkbox etykiet - tylko przerysowuje, nie filtruje
+document.getElementById("showEdgeLabels").onchange = drawD3Graph;
+
+// Inicjalne wywołanie
+updateVisualization();
 </script>
 </body>
 </html>
@@ -387,4 +490,4 @@ updateGraph();
 
 if __name__ == "__main__":
     data = generate_transaction_data_realistic(40, 700)
-    build_html(data, "transaction_graph_fixed3.html")
+    build_html(data, "transaction_graph_fixed4.html")
