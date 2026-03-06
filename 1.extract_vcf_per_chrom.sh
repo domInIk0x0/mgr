@@ -10,6 +10,7 @@ for chr in {1..22}; do
     plink2 \
         --pfile "$PFILE" \
         --chr "$chr" \
+        --keep-allele-order \
         --rm-dup force-first \
         --recode vcf bgz \
         --out "${OUTFILE%.vcf.gz}"
