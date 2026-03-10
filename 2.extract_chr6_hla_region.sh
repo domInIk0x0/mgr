@@ -1,7 +1,0 @@
-plink2 --vcf /mnt/ip114/DominikPietrzak/master_dgr/pliki_vcf_per_chrom/c6_f.vcf.gz \ 
-       --chr 6 \
-       --keep-allele-order \ 
-       --from-bp 28377797 \
-       --to-bp 33548354 \ 
-       --export vcf \
-       --out /mnt/ip114/DominikPietrzak/master_dgr/pliki_vcf_hla_regions/chr6_hla_28377797_33548354
